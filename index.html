@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bibliotheca — Library Management System</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="stamp">B</div>
+      <h1>Bibliotheca</h1>
+      <div class="tag">Library Management System</div>
+
+      <form id="login-form">
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" placeholder="admin" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" required>
+        </div>
+        <div class="err-msg" id="err"></div>
+        <button type="submit" class="btn burgundy">Sign in to the Reading Room</button>
+      </form>
+
+      <div class="login-hint">
+        Demo credentials — username <b>admin</b>, password <b>admin123</b><br>
+        All data lives locally in your browser. Nothing leaves this device.
+      </div>
+    </div>
+  </div>
+
+<script src="assets/app.js"></script>
+<script>
+  // if already signed in, skip straight to dashboard
+  if(currentSession()){ window.location.href = 'dashboard.html'; }
+
+  document.getElementById('login-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    const u = document.getElementById('username').value.trim();
+    const p = document.getElementById('password').value;
+    const users = readDB(DB_KEYS.users);
+    const found = users.find(x => x.username === u && x.password === p);
+    const errEl = document.getElementById('err');
+    if(found){
+      sessionStorage.setItem(DB_KEYS.session, JSON.stringify(found));
+      window.location.href = 'dashboard.html';
+    } else {
+      errEl.textContent = 'Incorrect username or password. Try admin / admin123.';
+    }
+  });
+</script>
+</body>
+</html>

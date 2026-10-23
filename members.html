@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Members — Bibliotheca</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="ledger-bar" class="ledger-bar"></div>
+  <div class="app-shell" id="shell"></div>
+
+  <div class="modal-overlay" id="member-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modal-title">Register Member</h3>
+        <button class="modal-close" onclick="closeModal('member-modal')">&times;</button>
+      </div>
+      <form id="member-form">
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field full">
+              <label>Full Name</label>
+              <input type="text" id="f-name" required>
+            </div>
+            <div class="field">
+              <label>Email</label>
+              <input type="email" id="f-email" required>
+            </div>
+            <div class="field">
+              <label>Phone</label>
+              <input type="text" id="f-phone" required>
+            </div>
+            <div class="field">
+              <label>Membership Plan</label>
+              <select id="f-membership">
+                <option>Monthly</option>
+                <option>Annual</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Status</label>
+              <select id="f-status">
+                <option>Active</option>
+                <option>Suspended</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn ghost" onclick="closeModal('member-modal')">Cancel</button>
+          <button type="submit" class="btn burgundy">Save Member</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<script src="assets/app.js"></script>
+<script>
+requireAuth();
+renderLedgerBar();
+renderShell('members');
+
+let editingId = null;
+let searchTerm = '';
+
+function render(){
+  const members = readDB(DB_KEYS.members);
+  const loans = refreshLoanStatuses();
+
+  const filtered = members.filter(m=>
+    !searchTerm || (m.name+m.email).toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Membership · ${members.length} Registered</div>
+        <h1>Members</h1>
+        <p class="desc">Manage patron records, standing, and borrowing eligibility.</p>
+      </div>
+      <button class="btn burgundy" onclick="openAddModal()">+ Register Member</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body">
+        <div class="search-row">
+          <input type="search" id="search-input" placeholder="Search by name or email…" value="${searchTerm}">
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body" style="padding-top:8px;">
+        ${filtered.length ? `
+        <table class="ledger">
+          <thead>
+            <tr><th>Name</th><th>Contact</th><th>Plan</th><th>Joined</th><th>On Loan</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${filtered.map(m=>{
+              const activeLoans = loans.filter(l=> l.memberId===m.id && (l.status==='Issued'||l.status==='Overdue')).length;
+              return `
+              <tr>
+                <td><strong>${m.name}</strong></td>
+                <td>
+                  <div class="small">${m.email}</div>
+                  <div class="mono small muted">${m.phone}</div>
+                </td>
+                <td>${m.membership}</td>
+                <td class="mono small">${fmtDate(m.joined)}</td>
+                <td>${activeLoans}</td>
+                <td><span class="badge ${m.status==='Active' ? 'available':'overdue'}">${m.status}</span></td>
+                <td>
+                  <div class="flex">
+                    <button class="btn ghost sm" onclick="openEditModal('${m.id}')">Edit</button>
+                    <button class="btn danger sm" onclick="deleteMember('${m.id}')">Delete</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        ` : `<div class="empty-state"><div class="glyph">🪪</div><div>No members match your search.</div></div>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('search-input').addEventListener('input', e=>{
+    searchTerm = e.target.value; render();
+    const el = document.getElementById('search-input');
+    el.focus(); el.setSelectionRange(el.value.length, el.value.length);
+  });
+}
+
+function openAddModal(){
+  editingId = null;
+  document.getElementById('modal-title').textContent = 'Register Member';
+  document.getElementById('member-form').reset();
+  openModal('member-modal');
+}
+
+function openEditModal(id){
+  const members = readDB(DB_KEYS.members);
+  const m = members.find(x=>x.id===id);
+  if(!m) return;
+  editingId = id;
+  document.getElementById('modal-title').textContent = 'Edit Member';
+  document.getElementById('f-name').value = m.name;
+  document.getElementById('f-email').value = m.email;
+  document.getElementById('f-phone').value = m.phone;
+  document.getElementById('f-membership').value = m.membership;
+  document.getElementById('f-status').value = m.status;
+  openModal('member-modal');
+}
+
+function deleteMember(id){
+  const loans = readDB(DB_KEYS.loans);
+  const activeLoan = loans.find(l=> l.memberId===id && (l.status==='Issued'||l.status==='Overdue'));
+  if(activeLoan){
+    toast('Cannot delete — this member has an active loan.');
+    return;
+  }
+  if(!confirm('Remove this member record? This cannot be undone.')) return;
+  let members = readDB(DB_KEYS.members);
+  members = members.filter(m=>m.id!==id);
+  writeDB(DB_KEYS.members, members);
+  toast('Member record removed.');
+  render();
+}
+
+document.getElementById('member-form').addEventListener('submit', function(e){
+  e.preventDefault();
+  const members = readDB(DB_KEYS.members);
+
+  if(editingId){
+    const m = members.find(x=>x.id===editingId);
+    m.name = document.getElementById('f-name').value.trim();
+    m.email = document.getElementById('f-email').value.trim();
+    m.phone = document.getElementById('f-phone').value.trim();
+    m.membership = document.getElementById('f-membership').value;
+    m.status = document.getElementById('f-status').value;
+    toast('Member updated.');
+  } else {
+    members.push({
+      id: uid('MB'),
+      name: document.getElementById('f-name').value.trim(),
+      email: document.getElementById('f-email').value.trim(),
+      phone: document.getElementById('f-phone').value.trim(),
+      membership: document.getElementById('f-membership').value,
+      status: document.getElementById('f-status').value,
+      joined: todayISO()
+    });
+    toast('New member registered.');
+  }
+  writeDB(DB_KEYS.members, members);
+  closeModal('member-modal');
+  render();
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Bibliotheca</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="ledger-bar" class="ledger-bar"></div>
+  <div class="app-shell" id="shell"></div>
+
+<script src="assets/app.js"></script>
+<script>
+requireAuth();
+renderLedgerBar();
+renderShell('dashboard');
+refreshLoanStatuses();
+
+function render(){
+  const books = readDB(DB_KEYS.books);
+  const members = readDB(DB_KEYS.members);
+  const loans = readDB(DB_KEYS.loans);
+
+  const totalCopies = books.reduce((s,b)=> s + b.copies, 0);
+  const totalAvailable = books.reduce((s,b)=> s + b.available, 0);
+  const issuedCount = loans.filter(l=> l.status==='Issued' || l.status==='Overdue').length;
+  const overdueCount = loans.filter(l=> l.status==='Overdue').length;
+  const activeMembers = members.filter(m=> m.status==='Active').length;
+
+  const recentLoans = [...loans].sort((a,b)=> new Date(b.issueDate)-new Date(a.issueDate)).slice(0,6);
+
+  const genreCounts = {};
+  books.forEach(b=> genreCounts[b.genre] = (genreCounts[b.genre]||0) + b.copies);
+  const topGenres = Object.entries(genreCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxGenre = Math.max(...topGenres.map(g=>g[1]), 1);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Overview · Ledger Entry ${todayISO()}</div>
+        <h1>Reading Room Dashboard</h1>
+        <p class="desc">A day's snapshot of the collection, circulation, and membership standing.</p>
+      </div>
+      <a href="transactions.html" class="btn burgundy">+ New Circulation Entry</a>
+    </div>
+
+    <div class="stat-grid">
+      <div class="index-card">
+        <div class="label">Titles in Catalog</div>
+        <div class="value">${books.length}</div>
+        <div class="trend">${totalCopies} total copies held</div>
+      </div>
+      <div class="index-card">
+        <div class="label">Copies Available</div>
+        <div class="value">${totalAvailable}</div>
+        <div class="trend up">on the shelf right now</div>
+      </div>
+      <div class="index-card">
+        <div class="label">Currently Issued</div>
+        <div class="value">${issuedCount}</div>
+        <div class="trend ${overdueCount ? 'warn':''}">${overdueCount} overdue</div>
+      </div>
+      <div class="index-card">
+        <div class="label">Active Members</div>
+        <div class="value">${activeMembers}</div>
+        <div class="trend">of ${members.length} registered</div>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:24px; align-items:start;">
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Recent Circulation</h3>
+          <a href="transactions.html" class="btn ghost sm">View all</a>
+        </div>
+        <div class="panel-body" style="padding-top:6px;">
+          <table class="ledger">
+            <thead><tr><th>Book</th><th>Member</th><th>Issued</th><th>Due</th><th>Status</th></tr></thead>
+            <tbody>
+              ${recentLoans.map(l=>{
+                const book = books.find(b=>b.id===l.bookId);
+                const member = members.find(m=>m.id===l.memberId);
+                return `<tr>
+                  <td>${book ? book.title : '—'}</td>
+                  <td>${member ? member.name : '—'}</td>
+                  <td class="mono small">${fmtDate(l.issueDate)}</td>
+                  <td class="mono small">${fmtDate(l.dueDate)}</td>
+                  <td><span class="badge ${l.status.toLowerCase()}">${l.status}</span></td>
+                </tr>`;
+              }).join('') || `<tr><td colspan="5" class="muted">No circulation activity yet.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Collection by Genre</h3></div>
+        <div class="panel-body">
+          ${topGenres.map(([g,c])=>`
+            <div style="margin-bottom:12px;">
+              <div class="flex small" style="justify-content:space-between; margin-bottom:4px;">
+                <span>${g}</span><span class="mono muted">${c}</span>
+              </div>
+              <div style="background:var(--sage); border-radius:2px; height:8px; overflow:hidden;">
+                <div style="width:${(c/maxGenre*100).toFixed(0)}%; background:var(--brass); height:100%;"></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+render();
+</script>
+</body>
+</html>

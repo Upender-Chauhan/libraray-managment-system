@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reports — Bibliotheca</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="ledger-bar" class="ledger-bar"></div>
+  <div class="app-shell" id="shell"></div>
+
+<script src="assets/app.js"></script>
+<script>
+requireAuth();
+renderLedgerBar();
+renderShell('reports');
+
+function render(){
+  const books = readDB(DB_KEYS.books);
+  const members = readDB(DB_KEYS.members);
+  const loans = refreshLoanStatuses();
+
+  // Most borrowed books
+  const borrowCounts = {};
+  loans.forEach(l=> borrowCounts[l.bookId] = (borrowCounts[l.bookId]||0) + 1);
+  const mostBorrowed = Object.entries(borrowCounts)
+    .map(([bookId,count])=> ({ book: books.find(b=>b.id===bookId), count }))
+    .filter(x=>x.book)
+    .sort((a,b)=> b.count - a.count)
+    .slice(0,5);
+  const maxBorrow = Math.max(...mostBorrowed.map(x=>x.count), 1);
+
+  // Overdue list
+  const overdue = loans.filter(l=>l.status==='Overdue').map(l=>({
+    loan: l,
+    book: books.find(b=>b.id===l.bookId),
+    member: members.find(m=>m.id===l.memberId),
+    lateDays: daysBetween(l.dueDate, todayISO())
+  })).sort((a,b)=> b.lateDays - a.lateDays);
+
+  // Membership breakdown
+  const planCounts = {};
+  members.forEach(m=> planCounts[m.membership] = (planCounts[m.membership]||0)+1);
+
+  // Returned on time vs late (historical)
+  const returned = loans.filter(l=>l.status==='Returned');
+  const late = returned.filter(l=> l.returnDate > l.dueDate).length;
+  const onTime = returned.length - late;
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Analysis</div>
+        <h1>Reports</h1>
+        <p class="desc">A ledger clerk's summary of collection health and reader behavior.</p>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items:start;">
+
+      <div class="panel">
+        <div class="panel-head"><h3>Most Borrowed Titles</h3></div>
+        <div class="panel-body">
+          ${mostBorrowed.length ? mostBorrowed.map(x=>`
+            <div style="margin-bottom:12px;">
+              <div class="flex small" style="justify-content:space-between; margin-bottom:4px;">
+                <span>${x.book.title}</span><span class="mono muted">${x.count}×</span>
+              </div>
+              <div style="background:var(--sage); border-radius:2px; height:8px; overflow:hidden;">
+                <div style="width:${(x.count/maxBorrow*100).toFixed(0)}%; background:var(--burgundy); height:100%;"></div>
+              </div>
+            </div>
+          `).join('') : `<p class="muted small">No circulation history yet.</p>`}
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>Membership Mix</h3></div>
+        <div class="panel-body">
+          ${Object.entries(planCounts).map(([plan,count])=>`
+            <div class="flex" style="justify-content:space-between; padding:10px 0; border-bottom:1px dashed var(--line);">
+              <span>${plan}</span>
+              <span class="mono">${count} member(s)</span>
+            </div>
+          `).join('')}
+          <div class="flex mt" style="justify-content:space-between;">
+            <span class="muted small">On-time returns</span>
+            <span class="badge available">${onTime}</span>
+          </div>
+          <div class="flex" style="justify-content:space-between; margin-top:8px;">
+            <span class="muted small">Late returns (historical)</span>
+            <span class="badge overdue">${late}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel mt">
+      <div class="panel-head">
+        <h3>Overdue Register</h3>
+        <a href="transactions.html" class="btn ghost sm">Go to Circulation</a>
+      </div>
+      <div class="panel-body" style="padding-top:6px;">
+        ${overdue.length ? `
+        <table class="ledger">
+          <thead><tr><th>Book</th><th>Member</th><th>Due</th><th>Days Late</th></tr></thead>
+          <tbody>
+            ${overdue.map(x=>`
+              <tr>
+                <td>${x.book ? x.book.title : '—'}</td>
+                <td>${x.member ? x.member.name : '—'}</td>
+                <td class="mono small">${fmtDate(x.loan.dueDate)}</td>
+                <td><span class="badge overdue">${x.lateDays}d</span></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ` : `<div class="empty-state"><div class="glyph">✅</div><div>Nothing overdue — the ledger is clean.</div></div>`}
+      </div>
+    </div>
+  `;
+}
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catalog — Bibliotheca</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="ledger-bar" class="ledger-bar"></div>
+  <div class="app-shell" id="shell"></div>
+
+  <div class="modal-overlay" id="book-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modal-title">Add Title</h3>
+        <button class="modal-close" onclick="closeModal('book-modal')">&times;</button>
+      </div>
+      <form id="book-form">
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field full">
+              <label>Title</label>
+              <input type="text" id="f-title" required>
+            </div>
+            <div class="field">
+              <label>Author</label>
+              <input type="text" id="f-author" required>
+            </div>
+            <div class="field">
+              <label>ISBN</label>
+              <input type="text" id="f-isbn" class="mono" required>
+            </div>
+            <div class="field">
+              <label>Genre</label>
+              <input type="text" id="f-genre" required>
+            </div>
+            <div class="field">
+              <label>Publication Year</label>
+              <input type="number" id="f-year" min="1000" max="2100" required>
+            </div>
+            <div class="field">
+              <label>Shelf Location</label>
+              <input type="text" id="f-shelf" placeholder="e.g. F-12" required>
+            </div>
+            <div class="field">
+              <label>Total Copies</label>
+              <input type="number" id="f-copies" min="1" required>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn ghost" onclick="closeModal('book-modal')">Cancel</button>
+          <button type="submit" class="btn burgundy">Save Title</button>
+        </div>
+      </form>
+    </div>
+  </div> 
+  
+<script src="assets/app.js"></script>
+<script>
+requireAuth();
+renderLedgerBar();
+renderShell('books');
+
+let editingId = null;
+let searchTerm = '';
+let genreFilter = 'All';
+
+function getGenres(){
+  const books = readDB(DB_KEYS.books);
+  return ['All', ...new Set(books.map(b=>b.genre))];
+}
+
+function render(){
+  const books = readDB(DB_KEYS.books);
+  const genres = getGenres();
+
+  let filtered = books.filter(b=>{
+    const matchesTerm = !searchTerm || (b.title+b.author+b.isbn).toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesGenre = genreFilter === 'All' || b.genre === genreFilter;
+    return matchesTerm && matchesGenre;
+  });
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Catalog · ${books.length} Titles</div>
+        <h1>Book Catalog</h1>
+        <p class="desc">Search, shelve, and manage every title held in the collection.</p>
+      </div>
+      <button class="btn burgundy" onclick="openAddModal()">+ Add Title</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body">
+        <div class="search-row">
+          <input type="search" id="search-input" placeholder="Search by title, author, or ISBN…" value="${searchTerm}">
+          <select id="genre-select">
+            ${genres.map(g=>`<option value="${g}" ${g===genreFilter?'selected':''}>${g}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body" style="padding-top:8px;">
+        ${filtered.length ? `
+        <table class="ledger">
+          <thead>
+            <tr><th>Title</th><th>Author</th><th>Genre</th><th>ISBN</th><th>Shelf</th><th>Availability</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${filtered.map(b=>`
+              <tr>
+                <td><strong>${b.title}</strong><div class="muted small">${b.year}</div></td>
+                <td>${b.author}</td>
+                <td>${b.genre}</td>
+                <td class="mono small">${b.isbn}</td>
+                <td class="mono small">${b.shelf}</td>
+                <td>
+                  <span class="badge ${b.available>0?'available':'issued'}">
+                    ${b.available>0 ? b.available+' / '+b.copies+' available' : 'all issued'}
+                  </span>
+                </td>
+                <td>
+                  <div class="flex">
+                    <button class="btn ghost sm" onclick="openEditModal('${b.id}')">Edit</button>
+                    <button class="btn danger sm" onclick="deleteBook('${b.id}')">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ` : `<div class="empty-state"><div class="glyph">📖</div><div>No titles match your search.</div></div>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('search-input').addEventListener('input', e=>{
+    searchTerm = e.target.value; render();
+    // preserve focus after re-render
+    const el = document.getElementById('search-input');
+    el.focus(); el.setSelectionRange(el.value.length, el.value.length);
+  });
+  document.getElementById('genre-select').addEventListener('change', e=>{
+    genreFilter = e.target.value; render();
+  });
+}
+
+function openAddModal(){
+  editingId = null;
+  document.getElementById('modal-title').textContent = 'Add Title';
+  document.getElementById('book-form').reset();
+  openModal('book-modal');
+}
+
+function openEditModal(id){
+  const books = readDB(DB_KEYS.books);
+  const b = books.find(x=>x.id===id);
+  if(!b) return;
+  editingId = id;
+  document.getElementById('modal-title').textContent = 'Edit Title';
+  document.getElementById('f-title').value = b.title;
+  document.getElementById('f-author').value = b.author;
+  document.getElementById('f-isbn').value = b.isbn;
+  document.getElementById('f-genre').value = b.genre;
+  document.getElementById('f-year').value = b.year;
+  document.getElementById('f-shelf').value = b.shelf;
+  document.getElementById('f-copies').value = b.copies;
+  openModal('book-modal');
+}
+
+function deleteBook(id){
+  const loans = readDB(DB_KEYS.loans);
+  const activeLoan = loans.find(l=> l.bookId===id && (l.status==='Issued'||l.status==='Overdue'));
+  if(activeLoan){
+    toast('Cannot delete — this title currently has a copy on loan.');
+    return;
+  }
+  if(!confirm('Remove this title from the catalog? This cannot be undone.')) return;
+  let books = readDB(DB_KEYS.books);
+  books = books.filter(b=>b.id!==id);
+  writeDB(DB_KEYS.books, books);
+  toast('Title removed from catalog.');
+  render();
+}
+
+document.getElementById('book-form').addEventListener('submit', function(e){
+  e.preventDefault();
+  const books = readDB(DB_KEYS.books);
+  const copies = parseInt(document.getElementById('f-copies').value, 10);
+
+  if(editingId){
+    const b = books.find(x=>x.id===editingId);
+    const issuedCopies = b.copies - b.available;
+    b.title = document.getElementById('f-title').value.trim();
+    b.author = document.getElementById('f-author').value.trim();
+    b.isbn = document.getElementById('f-isbn').value.trim();
+    b.genre = document.getElementById('f-genre').value.trim();
+    b.year = parseInt(document.getElementById('f-year').value, 10);
+    b.shelf = document.getElementById('f-shelf').value.trim();
+    b.copies = copies;
+    b.available = Math.max(0, copies - issuedCopies);
+    toast('Title updated.');
+  } else {
+    books.push({
+      id: uid('BK'),
+      title: document.getElementById('f-title').value.trim(),
+      author: document.getElementById('f-author').value.trim(),
+      isbn: document.getElementById('f-isbn').value.trim(),
+      genre: document.getElementById('f-genre').value.trim(),
+      year: parseInt(document.getElementById('f-year').value, 10),
+      shelf: document.getElementById('f-shelf').value.trim(),
+      copies: copies,
+      available: copies,
+      rating: 0
+    });
+    toast('New title added to the catalog.');
+  }
+  writeDB(DB_KEYS.books, books);
+  closeModal('book-modal');
+  render();
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circulation — Bibliotheca</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="ledger-bar" class="ledger-bar"></div>
+  <div class="app-shell" id="shell"></div>
+
+  <div class="modal-overlay" id="issue-modal">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Issue a Book</h3>
+        <button class="modal-close" onclick="closeModal('issue-modal')">&times;</button>
+      </div>
+      <form id="issue-form">
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field full">
+              <label>Book</label>
+              <select id="f-book" required></select>
+            </div>
+            <div class="field full">
+              <label>Member</label>
+              <select id="f-member" required></select>
+            </div>
+            <div class="field">
+              <label>Issue Date</label>
+              <input type="date" id="f-issue-date" required>
+            </div>
+            <div class="field">
+              <label>Loan Period (days)</label>
+              <input type="number" id="f-period" value="14" min="1" max="60" required>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn ghost" onclick="closeModal('issue-modal')">Cancel</button>
+          <button type="submit" class="btn burgundy">Confirm Issue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<script src="assets/app.js"></script>
+<script>
+requireAuth();
+renderLedgerBar();
+renderShell('transactions');
+
+let statusFilter = 'All';
+
+function render(){
+  const books = readDB(DB_KEYS.books);
+  const members = readDB(DB_KEYS.members);
+  const loans = refreshLoanStatuses();
+
+  const sorted = [...loans].sort((a,b)=> new Date(b.issueDate) - new Date(a.issueDate));
+  const filtered = statusFilter === 'All' ? sorted : sorted.filter(l=>l.status===statusFilter);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Circulation Desk</div>
+        <h1>Issue &amp; Return</h1>
+        <p class="desc">Track every title moving in and out of the reading room.</p>
+      </div>
+      <button class="btn burgundy" onclick="openIssueModal()">+ Issue a Book</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body">
+        <div class="search-row">
+          <select id="status-select">
+            ${['All','Issued','Overdue','Returned'].map(s=>`<option value="${s}" ${s===statusFilter?'selected':''}>${s}</option>`).join('')}
+          </select>
+          <span class="muted small right">${filtered.length} record(s)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-body" style="padding-top:8px;">
+        ${filtered.length ? `
+        <table class="ledger">
+          <thead>
+            <tr><th>Book</th><th>Member</th><th>Issued</th><th>Due</th><th>Returned</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${filtered.map(l=>{
+              const book = books.find(b=>b.id===l.bookId);
+              const member = members.find(m=>m.id===l.memberId);
+              const overdueDays = l.status==='Overdue' ? daysBetween(l.dueDate, todayISO()) : 0;
+              return `
+              <tr>
+                <td><strong>${book ? book.title : 'Deleted title'}</strong></td>
+                <td>${member ? member.name : 'Deleted member'}</td>
+                <td class="mono small">${fmtDate(l.issueDate)}</td>
+                <td class="mono small">${fmtDate(l.dueDate)}</td>
+                <td class="mono small">${l.returnDate ? fmtDate(l.returnDate) : '—'}</td>
+                <td>
+                  <span class="badge ${l.status.toLowerCase()}">${l.status}</span>
+                  ${overdueDays ? `<div class="small" style="color:var(--burgundy); margin-top:3px;">${overdueDays} day(s) late</div>` : ''}
+                </td>
+                <td>
+                  ${l.status !== 'Returned' ? `<button class="btn ghost sm" onclick="returnBook('${l.id}')">Mark Returned</button>` : ''}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        ` : `<div class="empty-state"><div class="glyph">🔖</div><div>No records for this filter.</div></div>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('status-select').addEventListener('change', e=>{
+    statusFilter = e.target.value; render();
+  });
+}
+
+function openIssueModal(){
+  const books = readDB(DB_KEYS.books).filter(b=>b.available>0);
+  const members = readDB(DB_KEYS.members).filter(m=>m.status==='Active');
+
+  const bookSelect = document.getElementById('f-book');
+  const memberSelect = document.getElementById('f-member');
+
+  if(!books.length){
+    toast('No copies currently available to issue.');
+    return;
+  }
+  if(!members.length){
+    toast('No active members eligible to borrow.');
+    return;
+  }
+
+  bookSelect.innerHTML = books.map(b=>`<option value="${b.id}">${b.title} (${b.available} available)</option>`).join('');
+  memberSelect.innerHTML = members.map(m=>`<option value="${m.id}">${m.name}</option>`).join('');
+  document.getElementById('f-issue-date').value = todayISO();
+  document.getElementById('f-period').value = 14;
+  openModal('issue-modal');
+}
+
+document.getElementById('issue-form').addEventListener('submit', function(e){
+  e.preventDefault();
+  const bookId = document.getElementById('f-book').value;
+  const memberId = document.getElementById('f-member').value;
+  const issueDate = document.getElementById('f-issue-date').value;
+  const period = parseInt(document.getElementById('f-period').value, 10);
+
+  const books = readDB(DB_KEYS.books);
+  const book = books.find(b=>b.id===bookId);
+  if(!book || book.available <= 0){
+    toast('That title no longer has a copy available.');
+    return;
+  }
+  book.available -= 1;
+  writeDB(DB_KEYS.books, books);
+
+  const loans = readDB(DB_KEYS.loans);
+  loans.push({
+    id: uid('LN'),
+    bookId, memberId,
+    issueDate,
+    dueDate: addDays(issueDate, period),
+    returnDate: null,
+    status: 'Issued'
+  });
+  writeDB(DB_KEYS.loans, loans);
+
+  toast('Book issued successfully.');
+  closeModal('issue-modal');
+  render();
+});
+
+function returnBook(loanId){
+  const loans = readDB(DB_KEYS.loans);
+  const loan = loans.find(l=>l.id===loanId);
+  if(!loan) return;
+  loan.status = 'Returned';
+  loan.returnDate = todayISO();
+  writeDB(DB_KEYS.loans, loans);
+
+  const books = readDB(DB_KEYS.books);
+  const book = books.find(b=>b.id===loan.bookId);
+  if(book){
+    book.available = Math.min(book.copies, book.available + 1);
+    writeDB(DB_KEYS.books, books);
+  }
+  toast('Book marked as returned.');
+  render();
+}
+
+render();
+</script>
+</body>
+</html>
